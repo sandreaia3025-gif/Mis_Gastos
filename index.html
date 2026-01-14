@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GastoFlow Master V11</title>
+    <title>GastoFlow V12 Final</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -22,21 +22,21 @@
         // --- PEGA TU API KEY AQUÍ ---
         const API_KEY = "AIzaSyBwyoge9Wy_CyViLRjr5xvpuDxx1ayRmhg"; 
 
-        // LISTA DE MODELOS (El código probará uno por uno hasta que funcione)
+        // LISTA INTELIGENTE: Si uno falla, prueba el siguiente
         const MODELOS = [
-            "gemini-1.5-flash",          // Estándar
-            "gemini-1.5-flash-001",      // Versión específica
-            "gemini-1.5-flash-002",      // Versión nueva
+            "gemini-1.5-flash",          // El más rápido y gratis
+            "gemini-2.0-flash-exp",      // El nuevo (Tu cuenta lo tiene)
             "gemini-1.5-flash-8b",       // Versión ligera
-            "gemini-2.0-flash-exp",      // Experimental (Tu última prueba)
-            "gemini-1.5-pro"             // Potente (Respaldo final)
+            "gemini-1.5-pro",            // Potente
+            "gemini-1.5-flash-001",      // Versión específica
+            "gemini-1.5-flash-002"       // Versión actualizada
         ];
 
         function App() {
             const [cargando, setCargando] = useState(false);
             const [estado, setEstado] = useState("Listo");
             const [config, setConfig] = useState(() => {
-                const s = localStorage.getItem('gf_v11_master');
+                const s = localStorage.getItem('gf_v12_final');
                 return s ? JSON.parse(s) : {
                     sel: 'Personal',
                     noms: ['Personal', 'Obra 1', 'Obra 2', 'Obra 3', 'Obra 4'],
@@ -46,7 +46,7 @@
                 };
             });
 
-            useEffect(() => { localStorage.setItem('gf_v11_master', JSON.stringify(config)); }, [config]);
+            useEffect(() => { localStorage.setItem('gf_v12_final', JSON.stringify(config)); }, [config]);
 
             const cambiarNombre = (i) => {
                 const viejo = config.noms[i];
@@ -89,7 +89,6 @@
             const procesarIA = async (e) => {
                 const file = e.target.files[0]; if(!file) return;
                 setCargando(true);
-                setEstado("Iniciando escaneo...");
                 
                 const reader = new FileReader();
                 reader.onloadend = async () => {
@@ -98,21 +97,19 @@
                         let resultado = null;
                         let modeloExitoso = "";
 
-                        // BUCLE MÁGICO: Prueba modelos uno por uno
+                        // BUCLE DE RESCATE: Prueba todos los modelos hasta que uno funcione
                         for (const modelo of MODELOS) {
                             try {
-                                setEstado(`Probando ${modelo.replace('gemini-','')}...`);
-                                console.log("Intentando con:", modelo);
+                                setEstado(`Probando motor ${modelo.replace('gemini-','')}...`);
                                 resultado = await intentarConModelo(modelo, base64);
                                 modeloExitoso = modelo;
-                                break; // ¡Éxito! Salimos del bucle
+                                break; // ¡Funcionó! Dejamos de probar
                             } catch (err) {
-                                console.log(`Falló ${modelo}, siguiente...`);
-                                // Si falla, sigue al siguiente automáticamente
+                                console.log(`Falló ${modelo}, probando siguiente...`);
                             }
                         }
 
-                        if (!resultado) throw new Error("Todos los modelos fallaron. Revisa tu internet o la API Key.");
+                        if (!resultado) throw new Error("Ningún modelo respondió. Intenta en 1 minuto.");
 
                         const texto = resultado.candidates[0].content.parts[0].text;
                         const partes = texto.split('|');
@@ -123,13 +120,15 @@
                         nG[config.sel] = [{id:Date.now(), d:desc, m:mont || 0, f:new Date().toLocaleDateString()}, ...nG[config.sel]];
                         setConfig({...config, gastos: nG});
                         
-                        alert(`¡Leído con éxito usando ${modeloExitoso.replace('gemini-','')}!`);
+                        // Pequeño aviso de éxito
+                        setEstado(`¡Leído con ${modeloExitoso.split('-')[1]}!`);
+                        setTimeout(() => setEstado("Listo"), 3000);
 
                     } catch (err) { 
-                        alert("Error Final: " + err.message); 
+                        alert("Error: " + err.message); 
+                        setEstado("Error");
                     }
                     setCargando(false);
-                    setEstado("Listo");
                 };
                 reader.readAsDataURL(file);
             };
@@ -141,7 +140,7 @@
             return (
                 <div className="max-w-md mx-auto p-5 pb-32">
                     <header className="flex justify-between items-center py-6">
-                        <h1 className="text-2xl font-black text-blue-400 italic">GASTOFLOW MASTER</h1>
+                        <h1 className="text-2xl font-black text-blue-400 italic">GASTOFLOW</h1>
                         <label className="bg-blue-600 w-12 h-12 rounded-2xl flex items-center justify-center text-xl shadow-lg cursor-pointer active:scale-90 transition-all">
                             📷<input type="file" accept="image/*" capture="environment" className="hidden" onChange={procesarIA} />
                         </label>
@@ -203,4 +202,12 @@
         root.render(<App />);
     </script>
 </body>
-</html> 
+</html>
+    
+            
+                
+                    
+                 
+                    
+                     
+         
