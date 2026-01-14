@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GastoFlow Directo</title>
+    <title>GastoFlow Diagnóstico</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -19,13 +19,13 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
         
-        // --- PEGA TU API KEY AQUÍ ABAJO (Entre las comillas) ---
+        // --- PEGA TU API KEY AQUÍ ---
         const API_KEY = "AIzaSyBwyoge9Wy_CyViLRjr5xvpuDxx1ayRmhg"; 
 
         function App() {
             const [cargando, setCargando] = useState(false);
             const [config, setConfig] = useState(() => {
-                const s = localStorage.getItem('gf_directo_v1');
+                const s = localStorage.getItem('gf_diag_final');
                 return s ? JSON.parse(s) : {
                     sel: 'Personal',
                     noms: ['Personal', 'Obra 1', 'Obra 2', 'Obra 3', 'Obra 4'],
@@ -35,7 +35,7 @@
                 };
             });
 
-            useEffect(() => { localStorage.setItem('gf_directo_v1', JSON.stringify(config)); }, [config]);
+            useEffect(() => { localStorage.setItem('gf_diag_final', JSON.stringify(config)); }, [config]);
 
             const cambiarNombre = (i) => {
                 const viejo = config.noms[i];
@@ -68,43 +68,42 @@
                     try {
                         const base64 = reader.result.split(',')[1];
                         
-                        // LÓGICA SIMPLIFICADA: "Texto|Precio"
-                        // Esto evita errores de formato JSON
+                        // Usamos el modelo más estándar para evitar errores raros
                         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ 
                                 contents: [{ parts: [
-                                    { text: "Analiza la imagen. Extrae la descripción principal (ej: Cemento Apasco, Gasolina Magna) y el Total. Responde en una sola línea con este formato exacto: Descripción|0.00" },
+                                    { text: "Lee el ticket. Responde SOLO con el nombre del producto principal y el precio total separados por una barra vertical (|). Ejemplo: Cemento|500. Si no se ve, responde: NADA|0" },
                                     { inline_data: { mime_type: "image/jpeg", data: base64 } }
                                 ]}]
                             })
                         });
                         
-                        if (!res.ok) throw new Error("Error de conexión con Google");
+                        // AQUÍ ESTÁ EL CHIVATO: Si falla, leemos el error real de Google
+                        if (!res.ok) {
+                            const errorBody = await res.json();
+                            // Convertimos el error a texto para que lo puedas leer
+                            const mensajeError = JSON.stringify(errorBody, null, 2);
+                            throw new Error("GOOGLE DICE:\n" + mensajeError);
+                        }
                         
                         const data = await res.json();
                         const texto = data.candidates[0].content.parts[0].text;
-                        
-                        // Limpiamos el texto para encontrar la barra |
                         let partes = texto.split('|');
                         
-                        // Si la IA falla y no pone barra, intentamos recuperar algo
-                        if (partes.length < 2) throw new Error("No pude encontrar el precio. Intenta otra foto.");
+                        if (partes.length < 2) throw new Error("La IA leyó esto (formato incorrecto): " + texto);
 
-                        const descripcion = partes[0].trim().replace(/\*/g, ''); // Quitamos asteriscos
-                        // Limpiamos el precio de signos de pesos o texto extra
-                        const precioStr = partes[1].replace(/[^0-9.]/g, ''); 
-                        const monto = parseFloat(precioStr);
-
-                        if (isNaN(monto)) throw new Error("Encontré la descripción pero no el precio.");
+                        const descripcion = partes[0].trim().replace(/\*/g, '');
+                        const monto = parseFloat(partes[1].replace(/[^0-9.]/g, ''));
 
                         let nG = {...config.gastos};
                         nG[config.sel] = [{id:Date.now(), d:descripcion, m:monto, f:new Date().toLocaleDateString()}, ...nG[config.sel]];
                         setConfig({...config, gastos: nG});
 
                     } catch (err) { 
-                        alert("AVISO: " + err.message); 
+                        // Muestra el error técnico completo en la pantalla
+                        alert(err.message); 
                     }
                     setCargando(false);
                 };
@@ -154,7 +153,7 @@
                     </div>
 
                     <div className="space-y-3">
-                        {cargando && <div className="p-4 glass text-center text-blue-400 animate-pulse text-xs font-bold italic tracking-widest">Leyendo ticket...</div>}
+                        {cargando && <div className="p-4 glass text-center text-blue-400 animate-pulse text-xs font-bold italic tracking-widest">IA leyendo ticket...</div>}
                         {config.gastos[config.sel].map(g => (
                             <div key={g.id} className="glass p-4 rounded-[1.5rem] flex justify-between items-center">
                                 <div><p className="font-bold text-sm leading-tight text-slate-100">{g.d}</p><p className="text-[9px] text-slate-400 font-bold">{g.f}</p></div>
@@ -181,9 +180,17 @@
     </script>
 </body>
 </html>
-
-                                 
+        
+                    
                         
+                        
+                       
+                   
+
+                    
+                        
+                       
+        
           
                                
 
