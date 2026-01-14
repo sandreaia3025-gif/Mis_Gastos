@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GastoFlow Final v3</title>
+    <title>GastoFlow V4</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <style>
         body { background: linear-gradient(135deg, #0f172a 0%, #334155 100%); min-height: 100vh; color: white; font-family: sans-serif; }
-        .glass { background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 2rem; }
+        .glass { background: rgba(255, 255, 255, 0.08); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 2rem; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
     </style>
 </head>
@@ -19,13 +19,13 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
         
-        // --- PEGA TU API KEY EN LA LÍNEA 23 (ENTRE LAS COMILLAS) ---
+        // --- PEGA TU API KEY AQUÍ ABAJO (DENTRO DE LAS COMILLAS) ---
         const API_KEY = "AIzaSyBwyoge9Wy_CyViLRjr5xvpuDxx1ayRmhg"; 
 
         function App() {
             const [cargando, setCargando] = useState(false);
             const [config, setConfig] = useState(() => {
-                const s = localStorage.getItem('gf_v_final_stable');
+                const s = localStorage.getItem('gf_v4_stable');
                 return s ? JSON.parse(s) : {
                     sel: 'Personal',
                     noms: ['Personal', 'Obra 1', 'Obra 2', 'Obra 3', 'Obra 4'],
@@ -35,7 +35,7 @@
                 };
             });
 
-            useEffect(() => { localStorage.setItem('gf_v_final_stable', JSON.stringify(config)); }, [config]);
+            useEffect(() => { localStorage.setItem('gf_v4_stable', JSON.stringify(config)); }, [config]);
 
             const cambiarNombre = (i) => {
                 const viejo = config.noms[i];
@@ -75,28 +75,32 @@
                 reader.onloadend = async () => {
                     try {
                         const base64 = reader.result.split(',')[1];
-                        // AQUÍ ESTÁ EL CAMBIO: Usamos gemini-1.5-flash-001 que es más estable
-                        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-001:generateContent?key=${API_KEY}`, {
+                        // ESTRATEGIA SIMPLE: Pedimos texto separado por barra |, no JSON complejo
+                        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ contents: [{ parts: [
-                                { text: "Analiza la imagen. Devuelve SOLO JSON puro: {\"c\":\"nombre_comercio\",\"t\":0.00}" },
+                                { text: "Analiza la imagen. Responde SOLO con el nombre del comercio y el total separados por una barra vertical. Ejemplo: Walmart|500.50. Si no ves total pon 0." },
                                 { inline_data: { mime_type: "image/jpeg", data: base64 } }
                             ]}]})
                         });
                         
-                        if (!res.ok) throw new Error("Error de conexión con Google");
+                        if (!res.ok) throw new Error("Error conectando con Google");
                         
                         const data = await res.json();
-                        let texto = data.candidates[0].content.parts[0].text;
-                        texto = texto.replace(/```json|```|json/g, "").trim();
+                        const texto = data.candidates[0].content.parts[0].text.trim();
                         
-                        const r = JSON.parse(texto);
+                        // Limpiamos el texto por si la IA añade cosas raras
+                        const partes = texto.split('|');
+                        const nombre = partes[0].replace(/\*/g, '').trim(); 
+                        const monto = parseFloat(partes[1]) || 0;
+
                         let nG = {...config.gastos};
-                        nG[config.sel] = [{id:Date.now(), d:r.c, m:Number(r.t), f:new Date().toLocaleDateString()}, ...nG[config.sel]];
+                        nG[config.sel] = [{id:Date.now(), d:nombre, m:monto, f:new Date().toLocaleDateString()}, ...nG[config.sel]];
                         setConfig({...config, gastos: nG});
                     } catch (err) { 
-                        alert("No se pudo leer el ticket. Revisa tu API Key o inténtalo de nuevo."); 
+                        alert("No pude leer el ticket. Intenta acercar más la cámara al precio."); 
+                        console.error(err);
                     }
                     setCargando(false);
                 };
@@ -148,7 +152,7 @@
                     </div>
 
                     <div className="space-y-3">
-                        {cargando && <div className="p-4 glass text-center text-blue-400 animate-pulse text-xs font-bold italic tracking-widest">Analizando...</div>}
+                        {cargando && <div className="p-4 glass text-center text-blue-400 animate-pulse text-xs font-bold italic tracking-widest">Analizando ticket...</div>}
                         {config.gastos[config.sel].map(g => (
                             <div key={g.id} className="glass p-4 rounded-[1.5rem] flex justify-between items-center">
                                 <div><p className="font-bold text-sm leading-tight text-slate-100">{g.d}</p><p className="text-[9px] text-slate-400 font-bold">{g.f}</p></div>
@@ -175,9 +179,8 @@
     </script>
 </body>
 </html>
-        
-                   
                        
+          
                                
 
                             
