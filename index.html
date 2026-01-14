@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GastoFlow V10 (2.0)</title>
+    <title>GastoFlow Master V11</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -19,13 +19,24 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
         
-        // --- PEGA TU API KEY AQUÍ ABAJO (LÍNEA 23) ---
+        // --- PEGA TU API KEY AQUÍ ---
         const API_KEY = "AIzaSyBwyoge9Wy_CyViLRjr5xvpuDxx1ayRmhg"; 
+
+        // LISTA DE MODELOS (El código probará uno por uno hasta que funcione)
+        const MODELOS = [
+            "gemini-1.5-flash",          // Estándar
+            "gemini-1.5-flash-001",      // Versión específica
+            "gemini-1.5-flash-002",      // Versión nueva
+            "gemini-1.5-flash-8b",       // Versión ligera
+            "gemini-2.0-flash-exp",      // Experimental (Tu última prueba)
+            "gemini-1.5-pro"             // Potente (Respaldo final)
+        ];
 
         function App() {
             const [cargando, setCargando] = useState(false);
+            const [estado, setEstado] = useState("Listo");
             const [config, setConfig] = useState(() => {
-                const s = localStorage.getItem('gf_v10_20');
+                const s = localStorage.getItem('gf_v11_master');
                 return s ? JSON.parse(s) : {
                     sel: 'Personal',
                     noms: ['Personal', 'Obra 1', 'Obra 2', 'Obra 3', 'Obra 4'],
@@ -35,7 +46,7 @@
                 };
             });
 
-            useEffect(() => { localStorage.setItem('gf_v10_20', JSON.stringify(config)); }, [config]);
+            useEffect(() => { localStorage.setItem('gf_v11_master', JSON.stringify(config)); }, [config]);
 
             const cambiarNombre = (i) => {
                 const viejo = config.noms[i];
@@ -60,46 +71,65 @@
                 }
             };
 
+            const intentarConModelo = async (modelo, base64) => {
+                const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${API_KEY}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        contents: [{ parts: [
+                            { text: "Lee el ticket. Responde SOLO: Concepto|Monto. Ej: Cemento|500. Si no hay: NADA|0" },
+                            { inline_data: { mime_type: "image/jpeg", data: base64 } }
+                        ]}]
+                    })
+                });
+                if (!res.ok) throw new Error("Fallo");
+                return await res.json();
+            };
+
             const procesarIA = async (e) => {
                 const file = e.target.files[0]; if(!file) return;
                 setCargando(true);
+                setEstado("Iniciando escaneo...");
+                
                 const reader = new FileReader();
                 reader.onloadend = async () => {
                     try {
                         const base64 = reader.result.split(',')[1];
-                        
-                        // AQUÍ ESTÁ EL CAMBIO: Usamos 'gemini-2.0-flash-exp' que es el que sale en tu foto
-                        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${API_KEY}`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ 
-                                contents: [{ parts: [
-                                    { text: "Lee el ticket. Responde SOLO con: Concepto|Monto. Ejemplo: Gasolina|500.00. Si no ves nada: NADA|0" },
-                                    { inline_data: { mime_type: "image/jpeg", data: base64 } }
-                                ]}]
-                            })
-                        });
-                        
-                        if (!res.ok) {
-                             const err = await res.json();
-                             throw new Error(err.error?.message || "Error al conectar");
+                        let resultado = null;
+                        let modeloExitoso = "";
+
+                        // BUCLE MÁGICO: Prueba modelos uno por uno
+                        for (const modelo of MODELOS) {
+                            try {
+                                setEstado(`Probando ${modelo.replace('gemini-','')}...`);
+                                console.log("Intentando con:", modelo);
+                                resultado = await intentarConModelo(modelo, base64);
+                                modeloExitoso = modelo;
+                                break; // ¡Éxito! Salimos del bucle
+                            } catch (err) {
+                                console.log(`Falló ${modelo}, siguiente...`);
+                                // Si falla, sigue al siguiente automáticamente
+                            }
                         }
-                        
-                        const data = await res.json();
-                        const texto = data.candidates[0].content.parts[0].text;
+
+                        if (!resultado) throw new Error("Todos los modelos fallaron. Revisa tu internet o la API Key.");
+
+                        const texto = resultado.candidates[0].content.parts[0].text;
                         const partes = texto.split('|');
-                        
-                        const desc = partes[0] ? partes[0].replace(/\*/g, '').trim() : "Gasto";
+                        const desc = partes[0] ? partes[0].replace(/\*/g, '').trim() : "Ticket";
                         const mont = partes[1] ? parseFloat(partes[1].replace(/[^0-9.]/g, '')) : 0;
 
                         let nG = {...config.gastos};
                         nG[config.sel] = [{id:Date.now(), d:desc, m:mont || 0, f:new Date().toLocaleDateString()}, ...nG[config.sel]];
                         setConfig({...config, gastos: nG});
+                        
+                        alert(`¡Leído con éxito usando ${modeloExitoso.replace('gemini-','')}!`);
 
                     } catch (err) { 
-                        alert("Error: " + err.message); 
+                        alert("Error Final: " + err.message); 
                     }
                     setCargando(false);
+                    setEstado("Listo");
                 };
                 reader.readAsDataURL(file);
             };
@@ -111,7 +141,7 @@
             return (
                 <div className="max-w-md mx-auto p-5 pb-32">
                     <header className="flex justify-between items-center py-6">
-                        <h1 className="text-2xl font-black text-blue-400 italic">GASTOFLOW 2.0</h1>
+                        <h1 className="text-2xl font-black text-blue-400 italic">GASTOFLOW MASTER</h1>
                         <label className="bg-blue-600 w-12 h-12 rounded-2xl flex items-center justify-center text-xl shadow-lg cursor-pointer active:scale-90 transition-all">
                             📷<input type="file" accept="image/*" capture="environment" className="hidden" onChange={procesarIA} />
                         </label>
@@ -147,7 +177,7 @@
                     </div>
 
                     <div className="space-y-3">
-                        {cargando && <div className="p-4 glass text-center text-blue-400 animate-pulse text-xs font-bold italic tracking-widest">Leyendo ticket...</div>}
+                        {cargando && <div className="p-4 glass text-center text-blue-400 animate-pulse text-xs font-bold italic tracking-widest">{estado}</div>}
                         {config.gastos[config.sel].map(g => (
                             <div key={g.id} className="glass p-4 rounded-[1.5rem] flex justify-between items-center">
                                 <div><p className="font-bold text-sm leading-tight text-slate-100">{g.d}</p><p className="text-[9px] text-slate-400 font-bold">{g.f}</p></div>
@@ -174,29 +204,3 @@
     </script>
 </body>
 </html>
-
-            
-            
-                      
-               
-                  
-                      
-                      
-  
-        
-                  
-                  
-              
-                              
-
-                   
-
-          
-                    
-                              
-                        
-                                
-                           
-                            
-                          
-        
