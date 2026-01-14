@@ -1,9 +1,9 @@
-<!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GastoFlow v6.</title>
+    <title>GastoFlow V7 Exito</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -20,12 +20,12 @@
         const { useState, useEffect } = React;
         
         // --- PEGA TU API KEY AQUÍ ABAJO ---
-        const API_KEY = "AIzaSyBwyoge9Wy_CyViLRjr5xvpuDxx1ayRmhg"; 
+        const API_KEY = "TAIzaSyBwyoge9Wy_CyViLRjr5xvpuDxx1ayRmhg"; 
 
         function App() {
             const [cargando, setCargando] = useState(false);
             const [config, setConfig] = useState(() => {
-                const s = localStorage.getItem('gf_v_final_exito');
+                const s = localStorage.getItem('gf_v7_final');
                 return s ? JSON.parse(s) : {
                     sel: 'Personal',
                     noms: ['Personal', 'Obra 1', 'Obra 2', 'Obra 3', 'Obra 4'],
@@ -35,7 +35,7 @@
                 };
             });
 
-            useEffect(() => { localStorage.setItem('gf_v_final_exito', JSON.stringify(config)); }, [config]);
+            useEffect(() => { localStorage.setItem('gf_v7_final', JSON.stringify(config)); }, [config]);
 
             const cambiarNombre = (i) => {
                 const viejo = config.noms[i];
@@ -68,14 +68,14 @@
                     try {
                         const base64 = reader.result.split(',')[1];
                         
-                        // CORRECCIÓN CLAVE: Usamos 'gemini-1.5-flash-001' que es el nombre exacto que funcionó
+                        // USAMOS EL MODELO CORRECTO: gemini-1.5-flash-001
+                        // Y pedimos formato simple Texto|Precio
                         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-001:generateContent?key=${API_KEY}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ 
                                 contents: [{ parts: [
-                                    // Petición simple para que lea "Cemento" y no falle
-                                    { text: "Analiza el ticket. Responde en una sola línea con este formato exacto: Nombre del Producto|0.00. Ejemplo: Cemento Apasco|250.50" },
+                                    { text: "Analiza el ticket. Responde en una sola línea con este formato exacto: Nombre del Producto|0.00. Ejemplo: Cemento|500. Si no ves nada, responde: NADA|0" },
                                     { inline_data: { mime_type: "image/jpeg", data: base64 } }
                                 ]}]
                             })
@@ -89,7 +89,6 @@
                         const data = await res.json();
                         const texto = data.candidates[0].content.parts[0].text;
                         
-                        // Limpieza robusta
                         let partes = texto.split('|');
                         if (partes.length < 2) throw new Error("La IA no encontró el formato Precio|Nombre");
 
@@ -177,14 +176,7 @@
         root.render(<App />);
     </script>
 </body>
-</html> 
-
-       
-                    
-                   
-                       
-
-                  
+</html>
         
                         
                 
