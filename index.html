@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GastoFlow Final v2</title>
+    <title>GastoFlow Diagnostico</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -19,13 +19,13 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
         
-        // --- PEGA TU API KEY EN LA LÍNEA DE ABAJO (NO BORRES LAS COMILLAS) ---
+        // --- PEGA TU API KEY AQUÍ ---
         const API_KEY = "AIzaSyBwyoge9Wy_CyViLRjr5xvpuDxx1ayRmhg"; 
 
         function App() {
             const [cargando, setCargando] = useState(false);
             const [config, setConfig] = useState(() => {
-                const s = localStorage.getItem('gf_v_final_renombrar');
+                const s = localStorage.getItem('gf_diag_v1');
                 return s ? JSON.parse(s) : {
                     sel: 'Personal',
                     noms: ['Personal', 'Obra 1', 'Obra 2', 'Obra 3', 'Obra 4'],
@@ -35,31 +35,23 @@
                 };
             });
 
-            useEffect(() => { localStorage.setItem('gf_v_final_renombrar', JSON.stringify(config)); }, [config]);
+            useEffect(() => { localStorage.setItem('gf_diag_v1', JSON.stringify(config)); }, [config]);
 
             const cambiarNombre = (i) => {
                 const viejo = config.noms[i];
-                const nuevo = prompt("Nuevo nombre para " + viejo + ":", viejo);
+                const nuevo = prompt("Nuevo nombre:", viejo);
                 if (nuevo && nuevo !== viejo) {
                     let nNoms = [...config.noms]; nNoms[i] = nuevo;
                     let nGastos = {...config.gastos}; nGastos[nuevo] = nGastos[viejo] || []; delete nGastos[viejo];
                     let nPres = {...config.pres}; nPres[nuevo] = nPres[viejo] || 0; delete nPres[viejo];
                     let nAbon = {...config.abon}; nAbon[nuevo] = nAbon[viejo] || 0; delete nAbon[viejo];
-                    
-                    setConfig({
-                        ...config,
-                        noms: nNoms,
-                        gastos: nGastos,
-                        pres: nPres,
-                        abon: nAbon,
-                        sel: config.sel === viejo ? nuevo : config.sel
-                    });
+                    setConfig({...config, noms: nNoms, gastos: nGastos, pres: nPres, abon: nAbon, sel: config.sel === viejo ? nuevo : config.sel});
                 }
             };
 
-            const ajustarPresupuesto = () => {
-                const p = prompt("Presupuesto Total Estimado:", config.pres[config.sel]);
-                const a = prompt("Monto Abonado (Real en caja):", config.abon[config.sel]);
+            const ajustar = () => {
+                const p = prompt("Presupuesto Total:", config.pres[config.sel]);
+                const a = prompt("Monto Abonado:", config.abon[config.sel]);
                 if (p !== null && a !== null) {
                     setConfig({...config, 
                         pres: {...config.pres, [config.sel]: parseFloat(p) || 0},
@@ -79,25 +71,24 @@
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ contents: [{ parts: [
-                                { text: "Analiza la imagen. Devuelve SOLO este JSON crudo sin formato markdown: {\"c\":\"nombre_comercio\",\"t\":0.00}" },
+                                { text: "JSON: {\"c\":\"comercio\",\"t\":0.0}" },
                                 { inline_data: { mime_type: "image/jpeg", data: base64 } }
                             ]}]})
                         });
                         
-                        if (!res.ok) throw new Error("API Key inválida o error de servidor");
+                        // AQUÍ ESTÁ EL DIAGNÓSTICO
+                        if (!res.ok) {
+                            const errorData = await res.json();
+                            throw new Error("GOOGLE DIJO: " + (errorData.error?.message || res.statusText));
+                        }
                         
                         const data = await res.json();
-                        let texto = data.candidates[0].content.parts[0].text;
-                        // Limpieza agresiva del texto para evitar errores
-                        texto = texto.replace(/```json|```|json/g, "").trim();
-                        
-                        const r = JSON.parse(texto);
+                        const r = JSON.parse(data.candidates[0].content.parts[0].text.replace(/```json|```/g, ""));
                         let nG = {...config.gastos};
                         nG[config.sel] = [{id:Date.now(), d:r.c, m:Number(r.t), f:new Date().toLocaleDateString()}, ...nG[config.sel]];
                         setConfig({...config, gastos: nG});
                     } catch (err) { 
-                        alert("Error: Revisa tu API Key. Asegúrate de que no tenga espacios extra."); 
-                        console.error(err);
+                        alert("ERROR TÉCNICO:\n" + err.message); 
                     }
                     setCargando(false);
                 };
@@ -112,7 +103,7 @@
                 <div className="max-w-md mx-auto p-5 pb-32">
                     <header className="flex justify-between items-center py-6">
                         <h1 className="text-2xl font-black text-blue-300 italic">GASTOFLOW</h1>
-                        <label className="bg-blue-600 w-12 h-12 rounded-2xl flex items-center justify-center text-xl shadow-lg cursor-pointer active:scale-90 transition-all">
+                        <label className="bg-blue-600 w-12 h-12 rounded-2xl flex items-center justify-center text-xl shadow-lg cursor-pointer">
                             📷<input type="file" accept="image/*" capture="environment" className="hidden" onChange={procesarIA} />
                         </label>
                     </header>
@@ -121,18 +112,16 @@
                         {config.noms.map((n, i) => (
                             <div key={i} className="flex flex-col items-center shrink-0">
                                 <button onClick={() => setConfig({...config, sel: n})} 
-                                    className={`px-5 py-2 rounded-xl text-[10px] font-bold transition-all ${config.sel === n ? 'bg-blue-600 shadow-lg text-white' : 'glass text-slate-300'}`}>
+                                    className={`px-5 py-2 rounded-xl text-[10px] font-bold ${config.sel === n ? 'bg-blue-600 shadow-lg text-white' : 'glass text-slate-300'}`}>
                                     {n.toUpperCase()}
                                 </button>
-                                <button onClick={() => cambiarNombre(i)} className="text-[8px] text-blue-400 mt-1 font-bold uppercase tracking-wider opacity-80">
-                                    EDITAR
-                                </button>
+                                <button onClick={() => cambiarNombre(i)} className="text-[8px] text-blue-400 mt-1 font-bold">EDITAR</button>
                             </div>
                         ))}
                     </div>
 
                     <div className="glass p-6 my-4 border-white/10 shadow-2xl relative">
-                        <button onClick={ajustarPresupuesto} className="absolute top-5 right-5 text-lg opacity-80">⚙️</button>
+                        <button onClick={ajustar} className="absolute top-5 right-5 text-sm opacity-50">⚙️</button>
                         <p className="text-[10px] font-bold text-blue-300 uppercase tracking-widest mb-1">{config.sel}</p>
                         <h2 className="text-5xl font-black mb-6">${gastado.toLocaleString()}</h2>
                         
@@ -176,4 +165,11 @@
     </script>
 </body>
 </html>
-                    
+    
+                
+
+                   
+
+                  
+                            
+       
