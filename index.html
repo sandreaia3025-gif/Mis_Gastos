@@ -3,120 +3,159 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GastoFlow Pro</title>
+    <title>GastoFlow Control Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        body { background: linear-gradient(135deg, #334155 0%, #475569 100%); min-height: 100vh; color: white; font-family: sans-serif; }
+        .glass { background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.2); }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+    </style>
 </head>
-<body class="bg-slate-950 text-white">
+<body>
     <div id="root"></div>
-
     <script type="text/babel">
         const { useState, useEffect } = React;
-
-        // 1. PEGA TU LLAVE JUSTO AQUÍ ENTRE LAS COMILLAS
+        
+        // --- PEGA TU API KEY AQUÍ ABAJO ---
         const API_KEY = "AIzaSyBwyoge9Wy_CyViLRjr5xvpuDxx1ayRmhg"; 
 
         function App() {
             const [cargando, setCargando] = useState(false);
             const [config, setConfig] = useState(() => {
-                const s = localStorage.getItem('gf_pro_v1');
+                const s = localStorage.getItem('gf_v_pro_final');
                 return s ? JSON.parse(s) : {
                     sel: 'Personal',
                     noms: ['Personal', 'Obra 1', 'Obra 2', 'Obra 3', 'Obra 4'],
+                    presupuesto: { 'Personal': 0, 'Obra 1': 0, 'Obra 2': 0, 'Obra 3': 0, 'Obra 4': 0 },
+                    abonado: { 'Personal': 0, 'Obra 1': 0, 'Obra 2': 0, 'Obra 3': 0, 'Obra 4': 0 },
                     gastos: { 'Personal': [], 'Obra 1': [], 'Obra 2': [], 'Obra 3': [], 'Obra 4': [] }
                 };
             });
 
-            useEffect(() => { localStorage.setItem('gf_pro_v1', JSON.stringify(config)); }, [config]);
+            useEffect(() => { localStorage.setItem('gf_v_pro_final', JSON.stringify(config)); }, [config]);
 
-            const editar = (i) => {
-                const n = prompt("Nuevo nombre:", config.noms[i]);
-                if(n) {
-                    let nN = [...config.noms]; let vN = nN[i]; nN[i] = n;
-                    let nG = {...config.gastos}; nG[n] = nG[vN] || [];
-                    setConfig({...config, noms: nN, gastos: nG, sel: n});
+            const editarPresupuesto = () => {
+                const p = prompt("Presupuesto Estimado (Total):", config.presupuesto[config.sel]);
+                const a = prompt("Monto Abonado (Real en caja):", config.abonado[config.sel]);
+                if (p !== null && a !== null) {
+                    setConfig({...config, 
+                        presupuesto: {...config.presupuesto, [config.sel]: parseFloat(p) || 0},
+                        abonado: {...config.abonado, [config.sel]: parseFloat(a) || 0}
+                    });
                 }
             };
 
-            const procesar = async (e) => {
+            const procesarIA = async (e) => {
                 const file = e.target.files[0]; if(!file) return;
                 setCargando(true);
                 const reader = new FileReader();
                 reader.onloadend = async () => {
+                    const base64 = reader.result.split(',')[1];
                     try {
-                        const base64 = reader.result.split(',')[1];
                         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`, {
-                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ contents: [{ parts: [
-                                { text: "JSON: {\"c\":\"comercio\",\"t\":0.0}" },
+                                { text: "Extrae el nombre del comercio y el total del ticket. Responde SOLO JSON: {\"c\":\"comercio\",\"t\":0.00}. Si no hay total, t:0" },
                                 { inline_data: { mime_type: "image/jpeg", data: base64 } }
                             ]}]})
                         });
-                        const d = await res.json();
-                        const r = JSON.parse(d.candidates[0].content.parts[0].text.replace(/```json|```/g, ""));
+                        const data = await res.json();
+                        const texto = data.candidates[0].content.parts[0].text;
+                        const r = JSON.parse(texto.replace(/```json|```/g, ""));
                         let nG = {...config.gastos};
                         nG[config.sel] = [{id:Date.now(), d:r.c, m:Number(r.t), f:new Date().toLocaleDateString()}, ...nG[config.sel]];
                         setConfig({...config, gastos: nG});
-                    } catch (err) { alert("Error: Revisa tu API KEY"); }
+                    } catch (err) { 
+                        alert("Error de conexión. Verifica tu API Key o conexión a internet."); 
+                        console.error(err);
+                    }
                     setCargando(false);
                 };
                 reader.readAsDataURL(file);
             };
 
-            const total = (config.gastos[config.sel] || []).reduce((a, b) => a + b.m, 0);
+            const gastado = (config.gastos[config.sel] || []).reduce((a, b) => a + b.m, 0);
+            const dispPresupuesto = config.presupuesto[config.sel] - gastado;
+            const dispReal = config.abonado[config.sel] - gastado;
 
             return (
-                <div className="max-w-md mx-auto p-5 pb-32 font-sans">
-                    <div className="flex justify-between items-center py-6">
-                        <h1 className="text-2xl font-black text-blue-500 italic">GASTOFLOW</h1>
-                        <label className="bg-blue-600 w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shadow-lg active:scale-90 transition-all cursor-pointer">
-                            📷<input type="file" accept="image/*" capture="environment" className="hidden" onChange={procesar} />
+                <div className="max-w-md mx-auto p-5 pb-32">
+                    <header className="flex justify-between items-center py-6">
+                        <h1 className="text-2xl font-black text-blue-300 italic">GASTOFLOW PRO</h1>
+                        <label className="bg-blue-500 w-12 h-12 rounded-2xl flex items-center justify-center text-xl shadow-lg cursor-pointer active:scale-90 transition-transform">
+                            📷<input type="file" accept="image/*" capture="environment" className="hidden" onChange={procesarIA} />
                         </label>
-                    </div>
+                    </header>
 
-                    <div className="flex gap-2 overflow-x-auto pb-4 mb-4 no-scrollbar">
+                    {/* Selector de Obras */}
+                    <div className="flex gap-2 overflow-x-auto pb-4 no-scrollbar">
                         {config.noms.map((n, i) => (
-                            <div key={i} className="text-center shrink-0">
-                                <button onClick={() => setConfig({...config, sel: n})} 
-                                    className={`px-5 py-2 rounded-xl text-xs font-bold ${config.sel === n ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-500'}`}>
-                                    {n}
-                                </button>
-                                <div onClick={() => editar(i)} className="text-[8px] text-blue-400 mt-1 font-bold uppercase">Editar</div>
-                            </div>
+                            <button key={i} onClick={() => setConfig({...config, sel: n})} 
+                                className={`px-5 py-2 rounded-xl text-[10px] font-bold shrink-0 transition-all ${config.sel === n ? 'bg-blue-500 text-white shadow-lg' : 'glass text-slate-300'}`}>
+                                {n.toUpperCase()}
+                            </button>
                         ))}
                     </div>
 
-                    <div className="bg-slate-900 border border-slate-800 p-10 rounded-[2.5rem] text-center my-6 shadow-2xl">
-                        <p className="text-[10px] font-bold text-blue-500 uppercase tracking-widest mb-1">{config.sel}</p>
-                        <h2 className="text-5xl font-black">${total.toFixed(2)}</h2>
+                    {/* Tarjeta de Control Financiero */}
+                    <div className="glass p-6 rounded-[2.5rem] my-4 shadow-2xl relative overflow-hidden">
+                        <div className="flex justify-between items-start mb-2">
+                            <div>
+                                <p className="text-[10px] font-bold text-blue-300 uppercase tracking-widest leading-none mb-1">{config.sel}</p>
+                                <h2 className="text-5xl font-black">${gastado.toLocaleString()}</h2>
+                                <p className="text-[10px] opacity-60 font-bold uppercase tracking-tighter">Total Gastado</p>
+                            </div>
+                            <button onClick={editarPresupuesto} className="bg-white/10 p-2 rounded-xl text-xs">⚙️</button>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 mt-6">
+                            <div className="bg-black/20 p-4 rounded-3xl border border-white/5">
+                                <p className="text-[9px] text-slate-400 font-bold uppercase mb-1">Resto Presupuesto</p>
+                                <p className={`text-lg font-black ${dispPresupuesto < 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                                    ${dispPresupuesto.toLocaleString()}
+                                </p>
+                            </div>
+                            <div className="bg-black/20 p-4 rounded-3xl border border-white/5">
+                                <p className="text-[9px] text-slate-400 font-bold uppercase mb-1">Disponible Real</p>
+                                <p className={`text-lg font-black ${dispReal < 0 ? 'text-red-400' : 'text-blue-300'}`}>
+                                    ${dispReal.toLocaleString()}
+                                </p>
+                            </div>
+                        </div>
                     </div>
 
+                    {/* Lista de Movimientos */}
                     <div className="space-y-3">
-                        {cargando && <div className="p-4 text-center text-blue-400 animate-pulse font-bold italic">IA leyendo ticket...</div>}
+                        <div className="flex justify-between items-center px-2">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Movimientos</p>
+                            <span className="text-[10px] bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-full font-bold">{config.gastos[config.sel].length}</span>
+                        </div>
+                        {cargando && <div className="p-4 glass rounded-3xl text-center text-blue-300 animate-pulse text-xs font-bold italic">IA leyendo ticket...</div>}
                         {config.gastos[config.sel].map(g => (
-                            <div key={g.id} className="bg-slate-900/50 p-5 rounded-2xl flex justify-between items-center border border-slate-800">
-                                <div><p className="font-bold text-sm">{g.d}</p><p className="text-[10px] text-slate-500 uppercase">{g.f}</p></div>
-                                <p className="font-black text-lg text-blue-500">${g.m.toFixed(2)}</p>
+                            <div key={g.id} className="glass p-4 rounded-[1.5rem] flex justify-between items-center shadow-sm">
+                                <div><p className="font-bold text-sm text-slate-100 leading-tight">{g.d}</p><p className="text-[9px] text-slate-400 font-bold uppercase">{g.f}</p></div>
+                                <p className="font-black text-lg text-blue-300">${g.m.toFixed(2)}</p>
                             </div>
                         ))}
                     </div>
 
                     <button onClick={() => {
-                        const d = prompt("Comercio:"); const m = prompt("Monto:");
+                        const d = prompt("Nombre del gasto:"); const m = prompt("Monto:");
                         if(d && m) {
                             let nG = {...config.gastos};
                             nG[config.sel] = [{id:Date.now(), d, m:parseFloat(m), f:new Date().toLocaleDateString()}, ...nG[config.sel]];
                             setConfig({...config, gastos: nG});
                         }
-                    }} className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-white text-slate-950 font-black px-12 py-4 rounded-2xl shadow-2xl active:scale-95 transition-all">
+                    }} className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-white text-slate-900 font-black px-12 py-4 rounded-2xl shadow-2xl active:scale-95 transition-all">
                         + MANUAL
                     </button>
                 </div>
             );
         }
-
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>
