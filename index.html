@@ -3,89 +3,100 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GastoFlow SDK V25</title>
+    <title>GastoFlow V26 Rastreador</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <style>
-        body { background: #0f172a; color: white; font-family: sans-serif; }
-        .glass { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 1.5rem; }
+        body { background: linear-gradient(135deg, #0f172a 0%, #334155 100%); min-height: 100vh; color: white; font-family: sans-serif; }
+        .glass { background: rgba(255, 255, 255, 0.08); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 2rem; }
     </style>
-    <script type="importmap">
-        {
-            "imports": {
-                "@google/generative-ai": "https://esm.run/@google/generative-ai",
-                "react": "https://esm.run/react@18",
-                "react-dom/client": "https://esm.run/react-dom@18/client"
-            }
-        }
-    </script>
 </head>
 <body>
     <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        const API_KEY = "AIzaSyBymDjTMhj4abQ2pXxVVQBIDZB8jtRmSFY"; // <-- PEGA TU LLAVE AQUÍ
 
-    <script type="module">
-        import { GoogleGenerativeAI } from "@google/generative-ai";
-        import React, { useState, useEffect } from "react";
-        import { createRoot } from "react-dom/client";
-
-        // --- TU API KEY VA AQUÍ ---
-        const API_KEY = "AIzaSyBymDjTMhj4abQ2pXxVVQBIDZB8jtRmSFY"; 
-
-        // Inicializamos el Robot Oficial de Google
-        const genAI = new GoogleGenerativeAI(API_KEY);
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        // LAS 3 RUTAS POSIBLES (El código probará todas)
+        const RUTAS = [
+            "v1beta/models/gemini-1.5-flash",
+            "v1beta/models/gemini-1.5-flash-latest",
+            "v1beta/models/gemini-2.0-flash-exp"
+        ];
 
         function App() {
             const [cargando, setCargando] = useState(false);
-            const [msj, setMsj] = useState("Listo");
+            const [estado, setEstado] = useState("Listo");
             const [config, setConfig] = useState(() => {
-                const s = localStorage.getItem('gf_v25_sdk');
+                const s = localStorage.getItem('gf_v26');
                 return s ? JSON.parse(s) : { sel: 'Personal', noms: ['Personal', 'Obra 1'], gastos: { 'Personal': [], 'Obra 1': [] } };
             });
 
-            useEffect(() => { localStorage.setItem('gf_v25_sdk', JSON.stringify(config)); }, [config]);
+            const editarNombre = (n, i) => {
+                const nuevo = prompt("Nombre:", n);
+                if (nuevo) {
+                    let nNoms = [...config.noms]; nNoms[i] = nuevo;
+                    let nGastos = {...config.gastos}; nGastos[nuevo] = nGastos[n] || [];
+                    setConfig({...config, noms: nNoms, gastos: nGastos, sel: nuevo});
+                }
+            };
 
-            const fileToGenerativePart = async (file) => {
-                const base64EncodedDataPromise = new Promise((resolve) => {
-                    const reader = new FileReader();
-                    reader.onloadend = () => resolve(reader.result.split(',')[1]);
-                    reader.readAsDataURL(file);
-                });
-                return {
-                    inlineData: { data: await base64EncodedDataPromise, mimeType: file.type },
-                };
+            const conectarConGoogle = async (base64) => {
+                // INTENTO DE FUERZA BRUTA: Probamos ruta por ruta
+                for (const ruta of RUTAS) {
+                    try {
+                        setEstado(`Probando ruta: ${ruta.split('/')[2]}...`);
+                        const res = await fetch(`https://generativelanguage.googleapis.com/${ruta}:generateContent?key=${API_KEY}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                contents: [{ parts: [
+                                    { text: "Lee el ticket. Responde SOLO: Comercio|Monto. Ej: HomeDepot|500.00" },
+                                    { inline_data: { mime_type: "image/jpeg", data: base64 } }
+                                ]}]
+                            })
+                        });
+
+                        if (res.ok) {
+                            const data = await res.json();
+                            return data; // ¡Si funciona, retornamos los datos y paramos!
+                        }
+                    } catch (e) {
+                        console.log("Fallo ruta " + ruta);
+                    }
+                }
+                throw new Error("Ninguna ruta funcionó. Verifica tu API Key.");
             };
 
             const procesarIA = async (e) => {
                 const file = e.target.files[0]; if(!file) return;
                 setCargando(true);
-                setMsj("Conectando con Google...");
                 
-                try {
-                    const imagePart = await fileToGenerativePart(file);
-                    
-                    // Usamos la librería oficial para generar contenido
-                    const result = await model.generateContent([
-                        "Analiza este ticket. Responde estrictamente en este formato: Comercio|Monto. Ejemplo: HomeDepot|120.50", 
-                        imagePart
-                    ]);
-                    
-                    const response = await result.response;
-                    const text = response.text();
-                    
-                    const [d, m] = text.split('|');
-                    const monto = m ? parseFloat(m.replace(/[^0-9.]/g, '')) : 0;
-                    
-                    let nG = {...config.gastos};
-                    nG[config.sel] = [{id:Date.now(), d:(d||"Gasto").trim(), m:monto, f:new Date().toLocaleDateString()}, ...(nG[config.sel] || [])];
-                    setConfig({...config, gastos: nG});
-                    setMsj("¡Leído!");
-                    
-                } catch (error) {
-                    console.error(error);
-                    alert("Error detallado: " + error.toString());
-                    setMsj("Error");
-                }
-                setCargando(false);
+                const reader = new FileReader();
+                reader.onloadend = async () => {
+                    try {
+                        const base64 = reader.result.split(',')[1];
+                        
+                        // Llamamos a la función que prueba todas las rutas
+                        const data = await conectarConGoogle(base64);
+                        
+                        const texto = data.candidates[0].content.parts[0].text;
+                        const [d, m] = texto.split('|');
+                        const monto = m ? parseFloat(m.replace(/[^0-9.]/g, '')) : 0;
+                        
+                        let nG = {...config.gastos};
+                        nG[config.sel] = [{id:Date.now(), d:(d||"Gasto").trim(), m:monto, f:new Date().toLocaleDateString()}, ...(nG[config.sel] || [])];
+                        setConfig({...config, gastos: nG});
+                        localStorage.setItem('gf_v26', JSON.stringify({...config, gastos: nG}));
+                        setEstado("¡Exito!");
+                        setTimeout(() => setEstado("Listo"), 2000);
+
+                    } catch (err) { alert("Error: " + err.message); setEstado("Error"); }
+                    setCargando(false);
+                };
+                reader.readAsDataURL(file);
             };
 
             const total = (config.gastos[config.sel] || []).reduce((a, b) => a + b.m, 0);
@@ -93,19 +104,33 @@
             return (
                 <div className="max-w-md mx-auto p-5 pb-32">
                     <header className="flex justify-between items-center py-6">
-                        <h1 className="text-2xl font-black text-blue-400 italic">GASTOFLOW PRO</h1>
+                        <h1 className="text-2xl font-black text-blue-400 italic">GASTOFLOW</h1>
                         <label className="bg-blue-600 w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg cursor-pointer">
                             📷<input type="file" accept="image/*" capture="environment" className="hidden" onChange={procesarIA} />
                         </label>
                     </header>
-                    <div className="glass p-6 mb-4">
-                        <p className="text-[10px] font-bold text-blue-400 uppercase mb-1">{config.sel}</p>
-                        <h2 className="text-4xl font-black">${total.toLocaleString('es-MX', {minimumFractionDigits:2})}</h2>
+
+                    <div className="flex gap-2 overflow-x-auto pb-4 no-scrollbar">
+                        {config.noms.map((n, i) => (
+                            <div key={i} className="flex flex-col items-center shrink-0">
+                                <button onClick={() => setConfig({...config, sel: n})}
+                                    className={`px-5 py-2 rounded-xl text-[10px] font-bold ${config.sel === n ? 'bg-blue-600 text-white' : 'glass text-slate-300'}`}>
+                                    {n.toUpperCase()}
+                                </button>
+                                <button onClick={() => editarNombre(n, i)} className="text-[8px] text-blue-400 uppercase mt-1">Editar</button>
+                            </div>
+                        ))}
                     </div>
+
+                    <div className="glass p-6 my-4 text-center">
+                        <p className="text-[10px] font-bold text-blue-400 uppercase mb-1">{config.sel}</p>
+                        <h2 className="text-5xl font-black">${total.toLocaleString('es-MX', {minimumFractionDigits:2})}</h2>
+                    </div>
+
                     <div className="space-y-3">
-                        {cargando && <div className="p-4 glass text-center text-blue-400 animate-pulse font-bold">{msj}</div>}
+                        {cargando && <div className="p-4 glass text-center text-blue-400 animate-pulse font-bold">{estado}</div>}
                         {(config.gastos[config.sel] || []).map(g => (
-                            <div key={g.id} className="glass p-4 flex justify-between items-center">
+                            <div key={g.id} className="glass p-4 rounded-2xl flex justify-between items-center">
                                 <div><p className="font-bold text-sm">{g.d}</p><p className="text-[9px] opacity-50">{g.f}</p></div>
                                 <p className="font-black text-lg text-blue-400">${g.m.toFixed(2)}</p>
                             </div>
@@ -114,17 +139,19 @@
                 </div>
             );
         }
-
-        const root = createRoot(document.getElementById('root'));
-        root.render(React.createElement(App));
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
     </script>
 </body>
 </html>
-            
-                   
 
-           
-
+       
+               
+                    
+                    
+         
+                  
+      
                   
 
                     
