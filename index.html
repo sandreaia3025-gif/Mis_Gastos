@@ -3,15 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GastoFlow Pro V20</title>
+    <title>GastoFlow V22</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <style>
-        body { background: linear-gradient(135deg, #0f172a 0%, #334155 100%); min-height: 100vh; color: white; font-family: sans-serif; }
-        .glass { background: rgba(255, 255, 255, 0.08); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 2rem; }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
+        body { background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); min-height: 100vh; color: white; font-family: sans-serif; }
+        .glass { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 1.5rem; }
     </style>
 </head>
 <body>
@@ -25,37 +24,24 @@
         function App() {
             const [cargando, setCargando] = useState(false);
             const [config, setConfig] = useState(() => {
-                const s = localStorage.getItem('gf_v20_pro');
+                const s = localStorage.getItem('gf_v22');
                 return s ? JSON.parse(s) : {
                     sel: 'Personal',
                     noms: ['Personal', 'Obra 1', 'Obra 2', 'Obra 3', 'Obra 4'],
-                    pres: { 'Personal': 0, 'Obra 1': 0, 'Obra 2': 0, 'Obra 3': 0, 'Obra 4': 0 },
-                    abon: { 'Personal': 0, 'Obra 1': 0, 'Obra 2': 0, 'Obra 3': 0, 'Obra 4': 0 },
                     gastos: { 'Personal': [], 'Obra 1': [], 'Obra 2': [], 'Obra 3': [], 'Obra 4': [] }
                 };
             });
 
-            useEffect(() => { localStorage.setItem('gf_v20_pro', JSON.stringify(config)); }, [config]);
+            useEffect(() => { localStorage.setItem('gf_v22', JSON.stringify(config)); }, [config]);
 
-            const manejarClickObra = (n, i) => {
-                if (config.sel === n) {
-                    const nuevo = prompt("Renombrar este proyecto:", n);
-                    if (nuevo && nuevo !== n) {
-                        let nNoms = [...config.noms]; nNoms[i] = nuevo;
-                        let nGastos = {...config.gastos}; nGastos[nuevo] = nGastos[n] || [];
-                        let nPres = {...config.pres}; nPres[nuevo] = nPres[n] || 0;
-                        let nAbon = {...config.abon}; nAbon[nuevo] = nAbon[n] || 0;
-                        setConfig({...config, noms: nNoms, gastos: nGastos, pres: nPres, abon: nAbon, sel: nuevo});
-                    }
-                } else {
-                    setConfig({...config, sel: n});
+            // FUNCIÓN PARA EDITAR NOMBRES
+            const editarNombre = (n, i) => {
+                const nuevo = prompt("Nuevo nombre para el proyecto:", n);
+                if (nuevo && nuevo !== n) {
+                    let nNoms = [...config.noms]; nNoms[i] = nuevo;
+                    let nGastos = {...config.gastos}; nGastos[nuevo] = nGastos[n] || [];
+                    setConfig({...config, noms: nNoms, gastos: nGastos, sel: nuevo});
                 }
-            };
-
-            const ajustar = () => {
-                const p = prompt("Presupuesto Total:", config.pres[config.sel]);
-                const a = prompt("Monto Abonado:", config.abon[config.sel]);
-                if (p !== null) setConfig({...config, pres: {...config.pres, [config.sel]: parseFloat(p) || 0}, abon: {...config.abon, [config.sel]: parseFloat(a) || 0}});
             };
 
             const procesarIA = async (e) => {
@@ -65,19 +51,26 @@
                 reader.onloadend = async () => {
                     try {
                         const base64 = reader.result.split(',')[1];
-                        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`, {
+                        // CORRECCIÓN CLAVE: Usamos /v1/ en lugar de /v1beta/
+                        const res = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${API_KEY}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
-                                contents: [{ parts: [{ text: "Analiza el ticket. Responde: Comercio|Total. Ejemplo: Soriana|450.00" }, { inline_data: { mime_type: "image/jpeg", data: base64 } }] }]
+                                contents: [{ parts: [
+                                    { text: "Lee el ticket. Responde solo: Comercio|Monto. Ejemplo: Soriana|450.00" },
+                                    { inline_data: { mime_type: "image/jpeg", data: base64 } }
+                                ]}]
                             })
                         });
                         const data = await res.json();
                         if (data.error) throw new Error(data.error.message);
-                        const [d, m] = data.candidates[0].content.parts[0].text.split('|');
-                        const montoLimpio = m ? parseFloat(m.replace(/[^0-9.]/g, '')) : 0;
+                        
+                        const texto = data.candidates[0].content.parts[0].text;
+                        const [d, m] = texto.split('|');
+                        const monto = m ? parseFloat(m.replace(/[^0-9.]/g, '')) : 0;
+                        
                         let nG = {...config.gastos};
-                        nG[config.sel] = [{id:Date.now(), d:(d||"Gasto").trim(), m:montoLimpio, f:new Date().toLocaleDateString()}, ...(nG[config.sel] || [])];
+                        nG[config.sel] = [{id:Date.now(), d:(d||"Gasto").trim(), m:monto, f:new Date().toLocaleDateString()}, ...(nG[config.sel] || [])];
                         setConfig({...config, gastos: nG});
                     } catch (err) { alert("Error: " + err.message); }
                     setCargando(false);
@@ -98,33 +91,25 @@
 
                     <div className="flex gap-2 overflow-x-auto pb-4 no-scrollbar">
                         {config.noms.map((n, i) => (
-                            <button key={i} onClick={() => manejarClickObra(n, i)}
-                                className={`px-5 py-2 rounded-xl text-[10px] font-bold shrink-0 transition-all ${config.sel === n ? 'bg-blue-600 text-white shadow-lg' : 'glass text-slate-300'}`}>
-                                {n.toUpperCase()}
-                            </button>
+                            <div key={i} className="shrink-0 flex flex-col items-center">
+                                <button onClick={() => setConfig({...config, sel: n})}
+                                    className={`px-5 py-2 rounded-xl text-[10px] font-bold ${config.sel === n ? 'bg-blue-600 text-white shadow-lg' : 'glass text-slate-300'}`}>
+                                    {n.toUpperCase()}
+                                </button>
+                                <button onClick={() => editarNombre(n, i)} className="text-[8px] text-blue-400 mt-1 font-bold uppercase">Editar</button>
+                            </div>
                         ))}
                     </div>
 
-                    <div className="glass p-6 my-4 relative border-white/10">
-                        <button onClick={ajustar} className="absolute top-5 right-5 opacity-40 text-[10px] font-bold uppercase">Configurar</button>
+                    <div className="glass p-6 my-4">
                         <p className="text-[10px] font-bold text-blue-400 uppercase mb-1">{config.sel}</p>
-                        <h2 className="text-5xl font-black mb-6">${total.toLocaleString('es-MX', {minimumFractionDigits:2})}</h2>
-                        <div className="grid grid-cols-2 gap-3">
-                            <div className="bg-black/20 p-4 rounded-3xl">
-                                <p className="text-[9px] text-slate-400 font-bold uppercase mb-1">Resto Presup.</p>
-                                <p className="text-lg font-black text-emerald-400">${(config.pres[config.sel] - total).toLocaleString()}</p>
-                            </div>
-                            <div className="bg-black/20 p-4 rounded-3xl">
-                                <p className="text-[9px] text-slate-400 font-bold uppercase mb-1">Saldo Real</p>
-                                <p className="text-lg font-black text-blue-300">${(config.abon[config.sel] - total).toLocaleString()}</p>
-                            </div>
-                        </div>
+                        <h2 className="text-5xl font-black mb-2">${total.toLocaleString('es-MX', {minimumFractionDigits:2})}</h2>
                     </div>
 
                     <div className="space-y-3">
-                        {cargando && <div className="p-4 glass text-center text-blue-400 animate-pulse font-bold tracking-widest">ESCANEANDO...</div>}
+                        {cargando && <div className="p-4 glass text-center text-blue-400 animate-pulse font-bold tracking-widest uppercase">Escaneando...</div>}
                         {(config.gastos[config.sel] || []).map(g => (
-                            <div key={g.id} className="glass p-4 rounded-[1.5rem] flex justify-between items-center">
+                            <div key={g.id} className="glass p-4 rounded-[1.2rem] flex justify-between items-center">
                                 <div><p className="font-bold text-sm text-slate-100">{g.d}</p><p className="text-[9px] opacity-40 font-bold">{g.f}</p></div>
                                 <p className="font-black text-lg text-blue-400">${g.m.toFixed(2)}</p>
                             </div>
@@ -138,10 +123,10 @@
     </script>
 </body>
 </html>
+       
                       
-                      
-           
-                   
+                  
+                        
 
                    
            
