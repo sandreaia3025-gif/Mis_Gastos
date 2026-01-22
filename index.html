@@ -1,153 +1,460 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GastoFlow V26 Rastreador</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <style>
-        body { background: linear-gradient(135deg, #0f172a 0%, #334155 100%); min-height: 100vh; color: white; font-family: sans-serif; }
-        .glass { background: rgba(255, 255, 255, 0.08); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 2rem; }
-    </style>
-</head>
-<body>
-    <div id="root"></div>
-    <script type="text/babel">
-        const { useState, useEffect } = React;
-        const API_KEY = "AIzaSyBymDjTMhj4abQ2pXxVVQBIDZB8jtRmSFY"; // <-- PEGA TU LLAVE AQUÍ
+import React, { useState, useEffect, useMemo } from 'react';
+import { createRoot } from 'react-dom/client';
+import { 
+  Plus, Trash2, X, Receipt, Edit3, Home, User, 
+  ChevronDown, Camera, Edit2, Loader2, Wallet, 
+  Briefcase, Plane, LayoutGrid, CheckCircle2, Save
+} from 'lucide-react';
+import { GoogleGenAI, Type } from "@google/genai";
 
-        // LAS 3 RUTAS POSIBLES (El código probará todas)
-        const RUTAS = [
-            "v1beta/models/gemini-1.5-flash",
-            "v1beta/models/gemini-1.5-flash-latest",
-            "v1beta/models/gemini-2.0-flash-exp"
-        ];
+// --- MOTOR DE PERSISTENCIA ULTRA-ROBUSTO ---
+const STORAGE_KEY = 'GF_PERMANENT_V12';
 
-        function App() {
-            const [cargando, setCargando] = useState(false);
-            const [estado, setEstado] = useState("Listo");
-            const [config, setConfig] = useState(() => {
-                const s = localStorage.getItem('gf_v26');
-                return s ? JSON.parse(s) : { sel: 'Personal', noms: ['Personal', 'Obra 1'], gastos: { 'Personal': [], 'Obra 1': [] } };
-            });
+const getInitialData = () => {
+  const defaultData = {
+    projects: [
+      { id: 'p-1', name: 'Gasto Personal', type: 'personal', budget: 2000, funded: 1000 },
+      { id: 'p-2', name: 'Hogar / Obra', type: 'obra', budget: 15000, funded: 5000 },
+      { id: 'p-3', name: 'Trabajo / Oficina', type: 'work', budget: 5000, funded: 2000 },
+      { id: 'p-4', name: 'Viajes', type: 'travel', budget: 3000, funded: 1500 },
+      { id: 'p-5', name: 'Ahorros / Otros', type: 'other', budget: 1000, funded: 500 }
+    ],
+    expenses: [],
+    activeProjectId: 'p-1'
+  };
 
-            const editarNombre = (n, i) => {
-                const nuevo = prompt("Nombre:", n);
-                if (nuevo) {
-                    let nNoms = [...config.noms]; nNoms[i] = nuevo;
-                    let nGastos = {...config.gastos}; nGastos[nuevo] = nGastos[n] || [];
-                    setConfig({...config, noms: nNoms, gastos: nGastos, sel: nuevo});
-                }
-            };
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      // Validar que los datos tengan la estructura correcta
+      if (parsed.projects && Array.isArray(parsed.projects) && parsed.projects.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.error("Error cargando localStorage", e);
+  }
+  return defaultData;
+};
 
-            const conectarConGoogle = async (base64) => {
-                // INTENTO DE FUERZA BRUTA: Probamos ruta por ruta
-                for (const ruta of RUTAS) {
-                    try {
-                        setEstado(`Probando ruta: ${ruta.split('/')[2]}...`);
-                        const res = await fetch(`https://generativelanguage.googleapis.com/${ruta}:generateContent?key=${API_KEY}`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                contents: [{ parts: [
-                                    { text: "Lee el ticket. Responde SOLO: Comercio|Monto. Ej: HomeDepot|500.00" },
-                                    { inline_data: { mime_type: "image/jpeg", data: base64 } }
-                                ]}]
-                            })
-                        });
+// Función global para guardar (forzado)
+const forceSave = (data: any) => {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    console.log("Datos guardados físicamente");
+  } catch (e) {
+    console.error("Fallo crítico al guardar", e);
+  }
+};
 
-                        if (res.ok) {
-                            const data = await res.json();
-                            return data; // ¡Si funciona, retornamos los datos y paramos!
-                        }
-                    } catch (e) {
-                        console.log("Fallo ruta " + ruta);
-                    }
-                }
-                throw new Error("Ninguna ruta funcionó. Verifica tu API Key.");
-            };
+const CATEGORIES = ['Comida', 'Transporte', 'Compras', 'Entretenimiento', 'Salud', 'Servicios', 'Materiales', 'Mano de Obra', 'Otros'] as const;
+type Category = typeof CATEGORIES[number];
 
-            const procesarIA = async (e) => {
-                const file = e.target.files[0]; if(!file) return;
-                setCargando(true);
-                
-                const reader = new FileReader();
-                reader.onloadend = async () => {
-                    try {
-                        const base64 = reader.result.split(',')[1];
-                        
-                        // Llamamos a la función que prueba todas las rutas
-                        const data = await conectarConGoogle(base64);
-                        
-                        const texto = data.candidates[0].content.parts[0].text;
-                        const [d, m] = texto.split('|');
-                        const monto = m ? parseFloat(m.replace(/[^0-9.]/g, '')) : 0;
-                        
-                        let nG = {...config.gastos};
-                        nG[config.sel] = [{id:Date.now(), d:(d||"Gasto").trim(), m:monto, f:new Date().toLocaleDateString()}, ...(nG[config.sel] || [])];
-                        setConfig({...config, gastos: nG});
-                        localStorage.setItem('gf_v26', JSON.stringify({...config, gastos: nG}));
-                        setEstado("¡Exito!");
-                        setTimeout(() => setEstado("Listo"), 2000);
+const CATEGORY_COLORS: Record<Category, string> = {
+  'Comida': '#FF9500', 'Transporte': '#5856D6', 'Compras': '#FF2D55', 
+  'Entretenimiento': '#AF52DE', 'Salud': '#FF3B30', 'Servicios': '#007AFF', 
+  'Materiales': '#5AC8FA', 'Mano de Obra': '#34C759', 'Otros': '#8E8E93'
+};
 
-                    } catch (err) { alert("Error: " + err.message); setEstado("Error"); }
-                    setCargando(false);
-                };
-                reader.readAsDataURL(file);
-            };
+const PROJECT_ICONS: Record<string, any> = {
+  personal: User,
+  obra: Home,
+  work: Briefcase,
+  travel: Plane,
+  other: LayoutGrid
+};
 
-            const total = (config.gastos[config.sel] || []).reduce((a, b) => a + b.m, 0);
+// --- SERVICIO IA GEMINI ---
+const extractWithGemini = async (base64Image: string) => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: {
+      parts: [
+        { inlineData: { mimeType: "image/jpeg", data: base64Image.split(',')[1] } },
+        { text: "Extrae: description, amount (numero), date (YYYY-MM-DD), category (Comida, Transporte, Compras, Entretenimiento, Salud, Servicios, Materiales, Mano de Obra, Otros). JSON." }
+      ]
+    },
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          description: { type: Type.STRING },
+          amount: { type: Type.NUMBER },
+          date: { type: Type.STRING },
+          category: { type: Type.STRING }
+        },
+        required: ["description", "amount", "date", "category"]
+      }
+    }
+  });
+  return JSON.parse(response.text || '{}');
+};
 
-            return (
-                <div className="max-w-md mx-auto p-5 pb-32">
-                    <header className="flex justify-between items-center py-6">
-                        <h1 className="text-2xl font-black text-blue-400 italic">GASTOFLOW</h1>
-                        <label className="bg-blue-600 w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg cursor-pointer">
-                            📷<input type="file" accept="image/*" capture="environment" className="hidden" onChange={procesarIA} />
-                        </label>
-                    </header>
+const App = () => {
+  // Inicialización directa de estado para evitar parpadeos
+  const [data, setData] = useState(getInitialData());
+  const [isAdding, setIsAdding] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
+  const [isEditingProject, setIsEditingProject] = useState(false);
+  const [projectToEdit, setProjectToEdit] = useState<any>(null);
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'history'>('dashboard');
+  const [formData, setFormData] = useState({
+    description: '', amount: 0, date: new Date().toISOString().split('T')[0], category: 'Otros' as Category
+  });
 
-                    <div className="flex gap-2 overflow-x-auto pb-4 no-scrollbar">
-                        {config.noms.map((n, i) => (
-                            <div key={i} className="flex flex-col items-center shrink-0">
-                                <button onClick={() => setConfig({...config, sel: n})}
-                                    className={`px-5 py-2 rounded-xl text-[10px] font-bold ${config.sel === n ? 'bg-blue-600 text-white' : 'glass text-slate-300'}`}>
-                                    {n.toUpperCase()}
-                                </button>
-                                <button onClick={() => editarNombre(n, i)} className="text-[8px] text-blue-400 uppercase mt-1">Editar</button>
-                            </div>
-                        ))}
-                    </div>
+  // Guardado de emergencia al cerrar o cambiar de app
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        forceSave(data);
+      }
+    };
+    window.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', () => forceSave(data));
+    return () => {
+      window.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', () => forceSave(data));
+    };
+  }, [data]);
 
-                    <div className="glass p-6 my-4 text-center">
-                        <p className="text-[10px] font-bold text-blue-400 uppercase mb-1">{config.sel}</p>
-                        <h2 className="text-5xl font-black">${total.toLocaleString('es-MX', {minimumFractionDigits:2})}</h2>
-                    </div>
+  // Función Helper para actualizar estado y disco simultáneamente
+  const updateStore = (updater: (prev: any) => any) => {
+    setData(prev => {
+      const next = updater(prev);
+      forceSave(next); // Guardado inmediato
+      return next;
+    });
+  };
 
-                    <div className="space-y-3">
-                        {cargando && <div className="p-4 glass text-center text-blue-400 animate-pulse font-bold">{estado}</div>}
-                        {(config.gastos[config.sel] || []).map(g => (
-                            <div key={g.id} className="glass p-4 rounded-2xl flex justify-between items-center">
-                                <div><p className="font-bold text-sm">{g.d}</p><p className="text-[9px] opacity-50">{g.f}</p></div>
-                                <p className="font-black text-lg text-blue-400">${g.m.toFixed(2)}</p>
-                            </div>
-                        ))}
-                    </div>
+  const activeProject = useMemo(() => 
+    data.projects.find((p: any) => p.id === data.activeProjectId) || data.projects[0], 
+  [data]);
+
+  const projectExpenses = useMemo(() => {
+    return data.expenses
+      .filter((e: any) => e.projectId === data.activeProjectId)
+      .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [data]);
+
+  const stats = useMemo(() => {
+    const totalSpent = projectExpenses.reduce((sum: number, e: any) => sum + e.amount, 0);
+    const balance = activeProject.funded - totalSpent;
+    const progress = (totalSpent / (activeProject.funded || 1)) * 100;
+    return { spent: totalSpent, balance, progress };
+  }, [projectExpenses, activeProject]);
+
+  const handleSaveExpense = () => {
+    if (!formData.description || !formData.amount) return;
+    const newExp = {
+      id: 'exp-' + Date.now(),
+      projectId: data.activeProjectId,
+      ...formData,
+      amount: Number(formData.amount)
+    };
+    updateStore(prev => ({
+      ...prev,
+      expenses: [newExp, ...prev.expenses]
+    }));
+    setIsAdding(false);
+    setFormData({ description: '', amount: 0, date: new Date().toISOString().split('T')[0], category: 'Otros' });
+  };
+
+  const handleCreateProject = () => {
+    const newId = 'p-' + Date.now();
+    const newProject = { id: newId, name: 'Nuevo Proyecto', type: 'other', budget: 1000, funded: 0 };
+    updateStore(prev => ({
+      ...prev,
+      projects: [...prev.projects, newProject]
+    }));
+    setProjectToEdit(newProject);
+    setIsEditingProject(true);
+  };
+
+  const handleUpdateProject = () => {
+    updateStore(prev => ({
+      ...prev,
+      projects: prev.projects.map((p: any) => p.id === projectToEdit.id ? projectToEdit : p)
+    }));
+    setIsEditingProject(false);
+  };
+
+  const handleDeleteProject = () => {
+    if (data.projects.length <= 1) return alert("Mínimo una lista.");
+    updateStore(prev => {
+      const newProjects = prev.projects.filter((p: any) => p.id !== projectToEdit.id);
+      return {
+        ...prev,
+        projects: newProjects,
+        activeProjectId: newProjects[0].id
+      };
+    });
+    setIsEditingProject(false);
+  };
+
+  const handleScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsScanning(true);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const result = await extractWithGemini(reader.result as string);
+        setFormData(prev => ({ ...prev, ...result }));
+      } catch (err) {
+        alert("Error de IA. Introduce los datos a mano.");
+      } finally {
+        setIsScanning(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const ProjectIcon = (type: string) => {
+    const Icon = PROJECT_ICONS[type] || LayoutGrid;
+    return <Icon size={18} />;
+  };
+
+  return (
+    <div className="max-w-md mx-auto min-h-screen relative pb-32">
+      
+      {/* Selector de Listas */}
+      <div className={`fixed inset-0 bg-black/40 backdrop-blur-md z-50 transition-all ${isProjectMenuOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} onClick={() => setIsProjectMenuOpen(false)}>
+        <div className={`absolute bottom-0 left-0 right-0 bg-[#F2F2F7] rounded-t-[3rem] p-8 transition-transform duration-500 max-h-[85vh] overflow-y-auto ${isProjectMenuOpen ? 'translate-y-0' : 'translate-y-full'}`} onClick={e => e.stopPropagation()}>
+          <div className="w-12 h-1.5 bg-[#D1D1D6] rounded-full mx-auto mb-8" />
+          <div className="flex justify-between items-center mb-6 px-2">
+            <h2 className="text-xl font-black">Mis Listas</h2>
+            <button onClick={handleCreateProject} className="flex items-center gap-2 text-[#007AFF] font-bold text-sm bg-white px-4 py-2 rounded-xl shadow-sm">
+              <Plus size={16} /> Nueva
+            </button>
+          </div>
+          <div className="space-y-3">
+            {data.projects.map((p: any) => (
+              <div key={p.id} className={`w-full flex items-center justify-between p-4 rounded-3xl transition-all ${data.activeProjectId === p.id ? 'bg-white shadow-lg' : 'bg-white/40'}`}>
+                <button onClick={() => { updateStore(prev => ({...prev, activeProjectId: p.id})); setIsProjectMenuOpen(false); }} className="flex items-center gap-4 flex-1">
+                  <div className={`p-3 rounded-2xl ${data.activeProjectId === p.id ? 'bg-[#1C1C1E] text-white' : 'bg-[#D1D1D6] text-white'}`}>
+                    {ProjectIcon(p.type)}
+                  </div>
+                  <div className="text-left">
+                    <p className="font-bold text-sm">{p.name}</p>
+                    <p className="text-[10px] font-bold text-[#8E8E93] uppercase tracking-wider">
+                      Fondo: ${p.funded.toLocaleString()}
+                    </p>
+                  </div>
+                </button>
+                <button onClick={(e) => { e.stopPropagation(); setProjectToEdit({...p}); setIsEditingProject(true); }} className="p-3 text-[#007AFF]">
+                  <Edit2 size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Header */}
+      <header className="glass-header sticky top-0 px-6 py-4 flex justify-between items-center z-40">
+        <button onClick={() => setIsProjectMenuOpen(true)} className="flex items-center gap-3">
+          <div className="p-2.5 rounded-xl bg-[#1C1C1E] text-white shadow-lg">
+            {ProjectIcon(activeProject.type)}
+          </div>
+          <div className="text-left">
+            <div className="flex items-center gap-1.5">
+               <h1 className="text-[16px] font-black text-[#1C1C1E] tracking-tight">{activeProject.name}</h1>
+               <ChevronDown size={14} className="text-[#8E8E93]" />
+            </div>
+            <div className="flex items-center gap-1">
+              <CheckCircle2 size={8} className="text-green-500" />
+              <p className="text-[8px] font-black text-[#8E8E93] uppercase tracking-widest">Memoria Activa</p>
+            </div>
+          </div>
+        </button>
+        <div className="w-9 h-9 rounded-full bg-white/40 flex items-center justify-center text-[#1C1C1E] shadow-sm"><Wallet size={18} /></div>
+      </header>
+
+      {/* Tabs */}
+      <div className="px-4 mt-8">
+        <div className="bg-white/30 backdrop-blur-xl p-1 rounded-2xl flex border border-white/40 shadow-sm">
+          <button onClick={() => setActiveTab('dashboard')} className={`flex-1 py-2 text-[12px] font-black rounded-xl transition-all ${activeTab === 'dashboard' ? 'bg-white shadow-sm text-[#1C1C1E]' : 'text-[#8E8E93]'}`}>RESUMEN</button>
+          <button onClick={() => setActiveTab('history')} className={`flex-1 py-2 text-[12px] font-black rounded-xl transition-all ${activeTab === 'history' ? 'bg-white shadow-sm text-[#1C1C1E]' : 'text-[#8E8E93]'}`}>HISTORIAL</button>
+        </div>
+      </div>
+
+      <main className="py-6 px-4 animate-slide-up">
+        {activeTab === 'dashboard' ? (
+          <div className="space-y-6">
+            <div className="apple-card rounded-[2.5rem] p-7 space-y-6 bg-gradient-to-br from-white/95 to-white/70">
+              <div className="flex justify-between items-start">
+                <div>
+                  <p className="text-[10px] font-black text-[#8E8E93] uppercase tracking-widest">Saldo Disponible</p>
+                  <h2 className={`text-5xl font-black tracking-tighter mt-2 ${stats.balance < 0 ? 'text-[#FF3B30]' : 'text-[#1C1C1E]'}`}>
+                    ${stats.balance.toLocaleString()}
+                  </h2>
                 </div>
-            );
-        }
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
-</body>
-</html>
+                <button onClick={() => { setProjectToEdit({...activeProject}); setIsEditingProject(true); }} className="p-2.5 bg-white/80 rounded-xl text-[#007AFF] shadow-sm"><Edit3 size={16} /></button>
+              </div>
+              <div className="grid grid-cols-2 gap-4 pt-5 border-t border-black/5">
+                <div>
+                  <p className="text-[9px] font-black text-[#8E8E93] uppercase tracking-widest">Fondo</p>
+                  <p className="text-lg font-black text-[#1C1C1E]">${activeProject.funded.toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-[9px] font-black text-[#8E8E93] uppercase tracking-widest">Gastado</p>
+                  <p className="text-lg font-black text-[#1C1C1E]">${stats.spent.toLocaleString()}</p>
+                </div>
+              </div>
+            </div>
 
+            <div className="apple-card p-6 rounded-[2rem] space-y-3">
+              <div className="flex justify-between text-[10px] font-black text-[#8E8E93] uppercase tracking-widest">
+                <span>Progreso Gasto</span>
+                <span className={stats.progress > 90 ? 'text-[#FF3B30]' : 'text-[#007AFF]'}>{Math.round(stats.progress)}%</span>
+              </div>
+              <div className="h-2.5 bg-black/5 rounded-full overflow-hidden">
+                <div className={`h-full transition-all duration-1000 ${stats.progress > 90 ? 'bg-[#FF3B30]' : 'bg-[#007AFF]'}`} style={{ width: `${Math.min(stats.progress, 100)}%` }} />
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <h3 className="text-[13px] font-black text-[#1C1C1E] uppercase px-1 tracking-widest">Movimientos</h3>
+              <div className="space-y-3">
+                {projectExpenses.length > 0 ? projectExpenses.slice(0,5).map(exp => (
+                  <div key={exp.id} className="apple-card p-4 rounded-[2rem] flex items-center justify-between active:scale-[0.98]">
+                    <div className="flex items-center gap-4">
+                      <div className="w-11 h-11 rounded-2xl flex items-center justify-center text-white" style={{ backgroundColor: CATEGORY_COLORS[exp.category as Category] }}>
+                        <Receipt size={18} />
+                      </div>
+                      <div>
+                        <p className="font-bold text-sm text-[#1C1C1E]">{exp.description}</p>
+                        <p className="text-[9px] text-[#8E8E93] font-black uppercase">{exp.category}</p>
+                      </div>
+                    </div>
+                    <p className="font-black text-sm">-${exp.amount.toLocaleString()}</p>
+                  </div>
+                )) : <p className="text-center py-10 text-[10px] font-black text-[#8E8E93] uppercase">Sin actividad</p>}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3 animate-slide-up">
+            {projectExpenses.map((exp: any) => (
+              <div key={exp.id} className="apple-card p-4 rounded-[2rem] flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-sm" style={{ backgroundColor: CATEGORY_COLORS[exp.category as Category] }}>
+                    <Receipt size={16} />
+                  </div>
+                  <div>
+                    <p className="font-bold text-sm text-[#1C1C1E]">{exp.description}</p>
+                    <p className="text-[9px] text-[#8E8E93] font-black uppercase">{exp.date}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                   <p className="font-black text-sm">-${exp.amount.toLocaleString()}</p>
+                   <button onClick={() => updateStore(prev => ({...prev, expenses: prev.expenses.filter((e: any) => e.id !== exp.id)}))} className="text-[#D1D1D6] hover:text-[#FF3B30] p-1"><Trash2 size={14} /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </main>
+
+      {/* Botón Flotante Carbono */}
+      <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-40">
+        <button 
+          onClick={() => setIsAdding(true)} 
+          className="px-6 py-4 rounded-3xl font-black shadow-2xl active:scale-95 transition-all text-white bg-[#1C1C1E] flex items-center gap-3 border border-white/10"
+        >
+          <Plus size={20} strokeWidth={3} />
+          <span className="text-[13px] uppercase tracking-widest">Registrar</span>
+        </button>
+      </div>
+
+      {/* Modal Agregar Gasto */}
+      {isAdding && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xl z-[60] flex items-end sm:items-center justify-center p-4">
+          <div className="bg-[#F2F2F7]/95 w-full max-w-md rounded-[2.5rem] p-8 space-y-7 border border-white/40 shadow-2xl animate-slide-up">
+            <div className="flex justify-between items-center">
+              <h2 className="text-xl font-black">Nuevo Gasto</h2>
+              <button onClick={() => setIsAdding(false)} className="w-9 h-9 bg-white rounded-full flex items-center justify-center text-[#8E8E93]"><X size={18} /></button>
+            </div>
+
+            <div className="relative">
+              <input type="file" accept="image/*" capture="environment" onChange={handleScan} id="scan-input" className="hidden" />
+              <label htmlFor="scan-input" className="w-full py-8 border-2 border-dashed rounded-[2rem] flex flex-col items-center justify-center gap-2 cursor-pointer bg-white/50 border-black/5 hover:bg-white/80">
+                {isScanning ? <Loader2 className="animate-spin text-[#007AFF]" /> : (
+                  <>
+                    <div className="w-12 h-12 bg-[#007AFF] rounded-2xl flex items-center justify-center text-white shadow-lg"><Camera size={24} /></div>
+                    <p className="text-[10px] font-black uppercase text-[#007AFF]">Escanear Ticket IA</p>
+                  </>
+                )}
+              </label>
+            </div>
+
+            <div className="space-y-4">
+              <input type="text" placeholder="¿En qué gastaste?" className="w-full bg-white p-4 rounded-xl border border-black/5 font-bold outline-none" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} />
+              <div className="flex gap-3">
+                <input type="number" placeholder="0.00" className="flex-1 bg-white p-4 rounded-xl border border-black/5 font-black text-xl outline-none" value={formData.amount || ''} onChange={e => setFormData({...formData, amount: Number(e.target.value)})} />
+                <input type="date" className="flex-1 bg-white p-4 rounded-xl border border-black/5 font-bold text-xs" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} />
+              </div>
+              <div className="flex flex-wrap justify-center gap-2">
+                {CATEGORIES.map(cat => (
+                  <button key={cat} onClick={() => setFormData({...formData, category: cat})} className={`px-3 py-2 rounded-lg text-[9px] font-black uppercase border transition-all ${formData.category === cat ? 'bg-[#1C1C1E] text-white' : 'bg-white text-[#8E8E93] border-black/5'}`}>{cat}</button>
+                ))}
+              </div>
+            </div>
+            <button onClick={handleSaveExpense} className="w-full bg-[#007AFF] text-white py-4 rounded-2xl font-black shadow-lg">Confirmar</button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Ajustes de Lista (Edición de Nombre y Fondos) */}
+      {isEditingProject && projectToEdit && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xl z-[70] flex items-center justify-center p-6">
+          <div className="bg-[#F2F2F7] w-full max-w-sm rounded-[3rem] p-8 space-y-6 border border-white/50 shadow-2xl">
+            <h2 className="text-xl font-black">Ajustes Lista</h2>
+            <div className="space-y-4">
+              <div>
+                <p className="text-[9px] font-black text-[#8E8E93] ml-2 mb-1 uppercase tracking-widest">Nombre</p>
+                <input type="text" className="w-full bg-white p-4 rounded-xl font-bold border border-black/5 outline-none" value={projectToEdit.name} onChange={e => setProjectToEdit({...projectToEdit, name: e.target.value})} />
+              </div>
+              <div>
+                <p className="text-[9px] font-black text-[#8E8E93] ml-2 mb-1 uppercase tracking-widest">Fondo Disponible</p>
+                <input type="number" className="w-full bg-white p-4 rounded-xl font-bold border border-black/5 outline-none" value={projectToEdit.funded} onChange={e => setProjectToEdit({...projectToEdit, funded: Number(e.target.value)})} />
+              </div>
+              <div>
+                <p className="text-[9px] font-black text-[#8E8E93] ml-2 mb-1 uppercase tracking-widest">Icono</p>
+                <div className="flex gap-2">
+                  {Object.keys(PROJECT_ICONS).map(type => (
+                    <button key={type} onClick={() => setProjectToEdit({...projectToEdit, type})} className={`p-3 rounded-xl transition-all ${projectToEdit.type === type ? 'bg-[#1C1C1E] text-white' : 'bg-white text-[#8E8E93]'}`}>
+                      {React.createElement(PROJECT_ICONS[type], {size: 18})}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-3 pt-4">
+              <button onClick={handleDeleteProject} className="flex-1 bg-white text-[#FF3B30] py-4 rounded-2xl font-black border border-red-50">Eliminar</button>
+              <button onClick={handleUpdateProject} className="flex-[2] bg-[#1C1C1E] text-white py-4 rounded-2xl font-black flex items-center justify-center gap-2">
+                <Save size={18} /> Guardar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const container = document.getElementById('root');
+if (container) {
+  const root = createRoot(container);
+  root.render(<App />);
+}
        
                
-                    
+        
                     
          
                   
